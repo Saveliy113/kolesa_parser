@@ -1,49 +1,105 @@
-import * as cheerio from 'cheerio';
 import chalk from 'chalk';
-import { slugify } from 'transliteration';
+import dotenv from 'dotenv';
 
-import { arrayFromLength } from './helpers/common.js';
-import { getPageContent } from './helpers/puppeteer.js';
-import listItemsHandler from './handlers/listItemsHanlder.js';
+import adsListPageHandler from './handlers/adsListPageHandler.js';
+import getAdsHandler from './handlers/getAdsHandler.js';
+import getDetailsHandler from './handlers/getDetailsHandler.js';
+import checkInternetConnection from './helpers/checkInternetConnection.js';
+import { saveInformation } from './helpers/saveInformation.js';
+import filterData from './handlers/filterData.js';
 
-const SITE = 'https://kolesa.kz/cars/toyota/camry/';
-const initialPage = 72;
+// Accessing env variables
+dotenv.config();
 
 (async function main() {
-  let pageContent = await getPageContent(SITE);
-  let $ = cheerio.load(pageContent);
-  const totalPages = +$('.pager ul li:last span a').text();
+  const state = {
+    isStarting: true,
+    internetConnection: undefined,
+    totalPages: 0,
+    currentPage: 1,
+    currentItem: 1,
+    links: [],
+    items: [],
+  };
 
-  try {
-    for (const page of arrayFromLength(totalPages).slice(initialPage - 1)) {
-      console.log(
-        chalk.bgBlueBright.bold(`   📄 Page ${page} of ${totalPages}   `)
-      );
-      const carsItems = [];
-      if (page !== 1) {
-        const url = `${SITE}/?page=${page}`;
-        pageContent = await getPageContent(url);
-        $ = cheerio.load(pageContent);
+  while (true) {
+    try {
+      // При первом запуске проверяем интернет соединение,
+      //получаем общее количество страниц
+      if (state.isStarting) {
+        console.log(chalk.bold.green('🚀 Starting parsing proccess'));
+        state.isStarting = false;
+        await checkInternetConnection();
+        state.internetConnection = true;
+        console.log(chalk.green('😎 You are ready to parse!'));
       }
 
-      $('.a-card__link').each((i, header) => {
-        const url = $(header).attr('href');
-        const title = $(header).text();
-        if (!title.includes('\n')) {
-          carsItems.push({
-            title: title.trim(),
-            url: `https://kolesa.kz${url}`,
-            code: slugify(title),
-          });
-        }
-      });
+      // Если пропало интернет соединение, проверяем его.
+      // если восстановлено, продолжаем парсинг
+      if (!state.internetConnection && !state.isStarting) {
+        await checkInternetConnection();
+        state.internetConnection = true;
+        console.log(chalk.green('😎 You are back online'));
+      }
 
-      await listItemsHandler(carsItems);
+      // Получаем общее количество страниц
+      if (!state.totalPages) {
+        state.totalPages = await adsListPageHandler(process.env.SITE);
+        console.log(chalk.green(`Total pages count: ${state.totalPages}`));
+      }
 
-      console.log(carsItems);
+      // Получаем объявления со страницы
+      if (!state.links.length) {
+        const url =
+          state.currentPage !== 1
+            ? `${process.env.SITE}?page=${state.currentPage}`
+            : process.env.SITE;
+        console.log(chalk.yellow(`Getting page ${state.currentPage} links...`));
+        const adsLinks = await getAdsHandler(url);
+        state.links = adsLinks;
+        console.log(
+          chalk.bold.bgGreen(
+            `📃 Page ${state.currentPage} of ${state.totalPages}`
+          )
+        );
+      }
+
+      // Получаем данные с каждого объявления
+      for (const details of state.links.slice(state.currentItem - 1)) {
+        const car = await getDetailsHandler(details.url);
+        state.items.push(car);
+        state.currentItem++;
+      }
+      await saveInformation(state.items);
+
+      // Если все объявления со страницы обработаны, очищаем состояние
+      // и переходим к следующей странице
+      state.items = [];
+      state.links = [];
+      state.currentItem = 1;
+      state.currentPage += 1;
+
+      if (state.currentPage === state.totalPages) {
+        await filterData();
+        console.log(chalk.bgGreen('🏁 Parsing finished. Enjoy your data!'));
+        return;
+      }
+    } catch (error) {
+      if (error?.errCode === 400) {
+        return;
+      }
+
+      if (error?.errCode === 1) {
+        state.internetConnection = false;
+        console.log(
+          chalk.red('Internet connection is not available. Retrying...')
+        );
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        continue;
+      }
+
+      console.log(error);
+      return;
     }
-  } catch (error) {
-    console.log(chalk.red('An error has occured \n'));
-    console.log(error);
   }
 })();

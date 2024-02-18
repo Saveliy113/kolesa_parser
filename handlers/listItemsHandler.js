@@ -40,4 +40,3 @@ export default async function listItemsHandler(data) {
   }
 }
 
-async function saveData(data) {}

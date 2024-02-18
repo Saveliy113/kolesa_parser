@@ -1,3 +1,3 @@
-export function arrayFromLength(number) {
+export default function arrayFromLength(number) {
   return Array.from(new Array(number).keys()).map((k) => k + 1);
 }

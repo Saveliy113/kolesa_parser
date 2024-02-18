@@ -8,9 +8,11 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "axios": "^1.6.7",
     "chalk": "^5.3.0",
     "cheerio": "^1.0.0-rc.12",
     "cheerio-select": "^2.1.0",
+    "dotenv": "^16.4.4",
     "puppeteer": "^21.5.2",
     "transliteration": "^2.3.5"
   }
